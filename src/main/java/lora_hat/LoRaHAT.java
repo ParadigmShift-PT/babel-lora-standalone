@@ -24,18 +24,18 @@ public class LoRaHAT {
 
     public LoRaHAT(Context pi4j, String portName) {
         this.m0 = pi4j.create(DigitalOutput.newConfigBuilder(pi4j)
-                                  .id("M0")
-                                  .name("M0")
-                                  .address(M0_PIN)
-                                  .initial(DigitalState.LOW)
-                                  .build());
+                .id("M0")
+                .name("M0")
+                .address(M0_PIN)
+                .initial(DigitalState.LOW)
+                .build());
 
         this.m1 = pi4j.create(DigitalOutput.newConfigBuilder(pi4j)
-                                  .id("M1")
-                                  .name("M1")
-                                  .address(M1_PIN)
-                                  .initial(DigitalState.LOW)
-                                  .build());
+                .id("M1")
+                .name("M1")
+                .address(M1_PIN)
+                .initial(DigitalState.LOW)
+                .build());
 
         this.port = SerialPort.getCommPort(portName);
         this.port.setBaudRate(9600);
@@ -48,7 +48,7 @@ public class LoRaHAT {
     public void init() throws InterruptedException {
         if (!port.openPort()) {
             throw new RuntimeException("Failed to open port: " +
-                                       port.getSystemPortName());
+                    port.getSystemPortName());
         }
 
         m0.state(DigitalState.LOW);
@@ -71,7 +71,7 @@ public class LoRaHAT {
         byte[] response = new byte[12];
         int read = port.readBytes(response, 12);
         System.out.println("Read " + read + " bytes, first: " +
-                           String.format("0x%02X", response[0] & 0xFF));
+                String.format("0x%02X", response[0] & 0xFF));
         port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
         // int available = port.bytesAvailable();
         // if (available > 0) {
@@ -103,18 +103,18 @@ public class LoRaHAT {
         // addr=0, net_id=0, 868MHz, 22dBm, 2400 air rate, 240 byte buffer,
         // channel RSSI enabled (0x20), packet RSSI enabled (0x80), no crypt
         return new byte[] {
-            (byte)0xC2, // [0] command: write config, don't persist on power off
-            (byte)0x00, // [1] starting register address
-            (byte)0x09, // [2] number of registers to write
-            (byte)(ownAddr >> 8),   // [3] addr high
-            (byte)(ownAddr & 0xFF), // [4] addr low
-            (byte)0x00,             // [5] net id
-            (byte)0x62, // [6] UART 9600 (0x60) + air rate 2400 (0x02)
-            (byte)0x20, // [7] buffer 240 (0x00) + power 22dBm (0x00) + channel RSSI (0x20)
-            (byte)0x12, // [8] freq offset: 868 - 850 = 18 = 0x12
-            (byte)0xC3, // [9] 0x43 + packet RSSI (0x80)
-            (byte)0x00, // [10] crypt high
-            (byte)0x00  // [11] crypt low
+                (byte) 0xC2, // [0] command: write config, don't persist on power off
+                (byte) 0x00, // [1] starting register address
+                (byte) 0x09, // [2] number of registers to write
+                (byte) (ownAddr >> 8), // [3] addr high
+                (byte) (ownAddr & 0xFF), // [4] addr low
+                (byte) 0x00, // [5] net id
+                (byte) 0x62, // [6] UART 9600 (0x60) + air rate 2400 (0x02)
+                (byte) 0x20, // [7] buffer 240 (0x00) + power 22dBm (0x00) + channel RSSI (0x20)
+                (byte) 0x12, // [8] freq offset: 868 - 850 = 18 = 0x12
+                (byte) 0xC3, // [9] 0x43 + packet RSSI (0x80)
+                (byte) 0x00, // [10] crypt high
+                (byte) 0x00 // [11] crypt low
         };
     }
 
@@ -127,22 +127,23 @@ public class LoRaHAT {
     }
 
     public void send(int recipientAddr, byte[] payload) {
-        byte[] frame = new byte[6 + payload.length];
-        frame[0] = (byte)(recipientAddr >> 8);
-        frame[1] = (byte)(recipientAddr & 0xFF);
-        frame[2] = (byte)FREQ_OFFSET;
-        frame[3] = (byte)(ownAddr >> 8);
-        frame[4] = (byte)(ownAddr & 0xFF);
-        frame[5] = (byte)FREQ_OFFSET;
-        System.arraycopy(payload, 0, frame, 6, payload.length);
+        byte[] frame = new byte[3 + payload.length];
+        frame[0] = (byte) (recipientAddr >> 8);
+        frame[1] = (byte) (recipientAddr & 0xFF);
+        frame[2] = (byte) FREQ_OFFSET;
+        System.arraycopy(payload, 0, frame, 3, payload.length);
         port.writeBytes(frame, frame.length);
     }
 
-    public void broadcast(byte[] payload) { send(BROADCAST_ADDR, payload); }
+    public void broadcast(byte[] payload) {
+        send(BROADCAST_ADDR, payload);
+    }
 
     private void readLoop() {
         byte[] accumulator = new byte[512];
         int acc = 0;
+        long lastByteTime = 0;
+        final long FRAME_TIMEOUT_MS = 50;
 
         try {
             while (running && !Thread.currentThread().isInterrupted()) {
@@ -150,13 +151,14 @@ public class LoRaHAT {
                 if (available > 0) {
                     byte[] chunk = new byte[available];
                     port.readBytes(chunk, available);
-
                     System.arraycopy(chunk, 0, accumulator, acc, available);
                     acc += available;
-
-                    acc = tryParseFrames(accumulator, acc);
+                    lastByteTime = System.currentTimeMillis();
+                } else if (acc > 0 && System.currentTimeMillis() - lastByteTime > FRAME_TIMEOUT_MS) {
+                    onPacketReceived(accumulator, acc);
+                    acc = 0;
                 } else {
-                    Thread.sleep(10);
+                    Thread.sleep(5);
                 }
             }
         } catch (InterruptedException e) {
@@ -167,42 +169,25 @@ public class LoRaHAT {
     }
 
     private int tryParseFrames(byte[] buf, int len) {
-        // minimum 6 header bytes + 1 payload byte + 1 RSSI byte (if enabled)
-        int minFrame = 6 + (PACKET_RSSI ? 1 : 0) + 1;
-
+        int minFrame = 1 + (PACKET_RSSI ? 1 : 0);
         if (len < minFrame) {
             return len;
         }
-
         onPacketReceived(buf, len);
         return 0;
     }
 
     private void onPacketReceived(byte[] raw, int len) {
-        if (len < 6) {
-            System.err.println("Frame too short: " + len + " bytes");
-            return;
-        }
-
-        int recipientAddr = ((raw[0] & 0xFF) << 8) | (raw[1] & 0xFF);
-        int recipientFreq = raw[2] & 0xFF;
-        int senderAddr = ((raw[3] & 0xFF) << 8) | (raw[4] & 0xFF);
-        int senderFreq = raw[5] & 0xFF;
-
-        int payloadLen = len - 6 - (PACKET_RSSI ? 1 : 0);
+        int payloadLen = len - (PACKET_RSSI ? 1 : 0);
         if (payloadLen < 0) {
-            System.err.println(
-                "Frame too short to contain payload with RSSI enabled");
+            System.err.println("Frame too short");
             return;
         }
 
         byte[] payload = new byte[payloadLen];
-        System.arraycopy(raw, 6, payload, 0, payloadLen);
+        System.arraycopy(raw, 0, payload, 0, payloadLen);
 
-        System.out.printf(
-            "From: 0x%04X (%dMHz) To: 0x%04X (%dMHz) Payload (%d bytes): %s%n",
-            senderAddr, START_FREQ + senderFreq, recipientAddr,
-            START_FREQ + recipientFreq, payloadLen, bytesToHex(payload));
+        System.out.printf("Payload (%d bytes): %s%n", payloadLen, bytesToHex(payload));
 
         if (PACKET_RSSI) {
             int rssi = -(256 - (raw[len - 1] & 0xFF));
