@@ -11,6 +11,7 @@ public class LoRaHAT {
     private static final int FREQ_OFFSET = FREQ_MHZ - START_FREQ;
     private static final int BROADCAST_ADDR = 0xFFFF;
     private static final boolean PACKET_RSSI = true;
+    private final short ownAddr = 0x1234;
 
     private final SerialPort port;
     private volatile boolean running = false;
@@ -57,33 +58,40 @@ public class LoRaHAT {
         port.flushIOBuffers();
 
         byte[] cfg = buildConfigRegister();
+        System.out.print("Config bytes: ");
+        for (byte b : cfg)
+            System.out.printf("%02X ", b);
+        System.out.println();
+
         int written = port.writeBytes(cfg, cfg.length);
         System.out.println("Wrote " + written + " of " + cfg.length + " bytes");
         Thread.sleep(200);
 
         port.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 1000, 0);
-byte[] response = new byte[12];
-int read = port.readBytes(response, 12);
-System.out.println("Read " + read + " bytes, first: " + 
-        String.format("0x%02X", response[0] & 0xFF));
-port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
+        byte[] response = new byte[12];
+        int read = port.readBytes(response, 12);
+        System.out.println("Read " + read + " bytes, first: " +
+                           String.format("0x%02X", response[0] & 0xFF));
+        port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
         // int available = port.bytesAvailable();
         // if (available > 0) {
-        //     byte[] response = new byte[available];
-        //     port.readBytes(response, available);
-        //     if (response[0] != (byte)0xC1) {
-        //         throw new RuntimeException(
-        //             "Config failed, unexpected response: " +
-        //             String.format("0x%02X", response[0] & 0xFF));
-        //     }
+        // byte[] response = new byte[available];
+        // port.readBytes(response, available);
+        // if (response[0] != (byte)0xC1) {
+        // throw new RuntimeException(
+        // "Config failed, unexpected response: " +
+        // String.format("0x%02X", response[0] & 0xFF));
+        // }
         // } else {
-        //     throw new RuntimeException(
-        //         "No response from hat during configuration");
+        // throw new RuntimeException(
+        // "No response from hat during configuration");
         // }
 
         m0.state(DigitalState.LOW);
         m1.state(DigitalState.LOW);
         Thread.sleep(100);
+
+        port.flushIOBuffers();
 
         running = true;
         readerThread = new Thread(this::readLoop, "lora-reader");
@@ -98,9 +106,9 @@ port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
             (byte)0xC2, // [0] command: write config, don't persist on power off
             (byte)0x00, // [1] starting register address
             (byte)0x09, // [2] number of registers to write
-            (byte)0x00, // [3] addr high
-            (byte)0x00, // [4] addr low
-            (byte)0x00, // [5] net id
+            (byte)(ownAddr >> 8),   // [3] addr high
+            (byte)(ownAddr & 0xFF), // [4] addr low
+            (byte)0x00,             // [5] net id
             (byte)0x62, // [6] UART 9600 (0x60) + air rate 2400 (0x02)
             (byte)0x20, // [7] buffer 240 (0x00) + power 22dBm (0x00) + channel RSSI (0x20)
             (byte)0x12, // [8] freq offset: 868 - 850 = 18 = 0x12
@@ -119,11 +127,14 @@ port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
     }
 
     public void send(int recipientAddr, byte[] payload) {
-        byte[] frame = new byte[3 + payload.length];
+        byte[] frame = new byte[6 + payload.length];
         frame[0] = (byte)(recipientAddr >> 8);
         frame[1] = (byte)(recipientAddr & 0xFF);
         frame[2] = (byte)FREQ_OFFSET;
-        System.arraycopy(payload, 0, frame, 3, payload.length);
+        frame[3] = (byte)(ownAddr >> 8);
+        frame[4] = (byte)(ownAddr & 0xFF);
+        frame[5] = (byte)FREQ_OFFSET;
+        System.arraycopy(payload, 0, frame, 6, payload.length);
         port.writeBytes(frame, frame.length);
     }
 
@@ -156,8 +167,8 @@ port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
     }
 
     private int tryParseFrames(byte[] buf, int len) {
-        // minimum 3 header bytes + 1 payload byte + 1 RSSI byte (if enabled)
-        int minFrame = 3 + (PACKET_RSSI ? 1 : 0) + 1;
+        // minimum 6 header bytes + 1 payload byte + 1 RSSI byte (if enabled)
+        int minFrame = 6 + (PACKET_RSSI ? 1 : 0) + 1;
 
         if (len < minFrame) {
             return len;
@@ -168,15 +179,17 @@ port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
     }
 
     private void onPacketReceived(byte[] raw, int len) {
-        if (len < 3) {
+        if (len < 6) {
             System.err.println("Frame too short: " + len + " bytes");
             return;
         }
 
-        int senderAddr = ((raw[0] & 0xFF) << 8) | (raw[1] & 0xFF);
-        int freqOffset = raw[2] & 0xFF;
+        int recipientAddr = ((raw[0] & 0xFF) << 8) | (raw[1] & 0xFF);
+        int recipientFreq = raw[2] & 0xFF;
+        int senderAddr = ((raw[3] & 0xFF) << 8) | (raw[4] & 0xFF);
+        int senderFreq = raw[5] & 0xFF;
 
-        int payloadLen = len - 3 - (PACKET_RSSI ? 1 : 0);
+        int payloadLen = len - 6 - (PACKET_RSSI ? 1 : 0);
         if (payloadLen < 0) {
             System.err.println(
                 "Frame too short to contain payload with RSSI enabled");
@@ -184,11 +197,12 @@ port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
         }
 
         byte[] payload = new byte[payloadLen];
-        System.arraycopy(raw, 3, payload, 0, payloadLen);
+        System.arraycopy(raw, 6, payload, 0, payloadLen);
 
-        System.out.printf("From: 0x%04X  Freq: %dMHz  Payload (%d bytes): %s%n",
-                          senderAddr, START_FREQ + freqOffset, payloadLen,
-                          bytesToHex(payload));
+        System.out.printf(
+            "From: 0x%04X (%dMHz) To: 0x%04X (%dMHz) Payload (%d bytes): %s%n",
+            senderAddr, START_FREQ + senderFreq, recipientAddr,
+            START_FREQ + recipientFreq, payloadLen, bytesToHex(payload));
 
         if (PACKET_RSSI) {
             int rssi = -(256 - (raw[len - 1] & 0xFF));
@@ -204,4 +218,3 @@ port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
         return sb.toString().trim();
     }
 }
-
