@@ -7,11 +7,13 @@ public class LoRaPacket {
     private final int recipientAddr;
     private final int channel;
     private final byte[] payload;
+    private final int rssi;
 
     private LoRaPacket(Builder b) {
         this.recipientAddr = b.recipientAddr;
         this.channel = b.channel;
         this.payload = b.payload;
+        this.rssi = 0;
     }
 
     public byte[] toBytes() {
@@ -23,18 +25,46 @@ public class LoRaPacket {
         return frame;
     }
 
+    private LoRaPacket(byte[] payload, int rssi) {
+        this.recipientAddr = 0;
+        this.channel = 0;
+        this.payload = payload;
+        this.rssi = rssi;
+    }
+
+    public static LoRaPacket fromBytes(byte[] raw, int len,
+                                       boolean packetRssi) {
+        if (len <= 0)
+            return null;
+        int payloadLen = len - (packetRssi ? 1 : 0);
+        if (payloadLen < 0)
+            return null;
+
+        byte[] payload = new byte[payloadLen];
+        System.arraycopy(raw, 0, payload, 0, payloadLen);
+
+        int rssi = packetRssi ? -(256 - (raw[len - 1] & 0xFF)) : 0;
+
+        return new LoRaPacket(payload, rssi);
+    }
+
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("recipient : 0x%04X\n", recipientAddr));
-        sb.append(String.format("channel   : %d (%.3f MHz)\n", channel,
+        sb.append("LoRaPacket:\n");
+        sb.append(String.format("Recipient : 0x%04X\n", recipientAddr));
+        sb.append(String.format("Channel   : %d (%.3f MHz)\n", channel,
                                 850.125 + channel));
         sb.append(
-            String.format("payload   : %s\n",
+            String.format("Payload   : %s\n",
                           new String(payload, StandardCharsets.US_ASCII)));
-        sb.append("raw bytes : ");
+        sb.append("Raw bytes : ");
         for (byte b : toBytes())
             sb.append(String.format("%02X ", b & 0xFF));
+        
+        sb.append("\n");
+        if (rssi != 0)
+            sb.append(String.format("RSSI      : %d dBm", rssi));
         return sb.toString().trim();
     }
 

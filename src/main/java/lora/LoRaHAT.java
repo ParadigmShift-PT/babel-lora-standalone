@@ -174,30 +174,12 @@ public class LoRaHAT {
     }
 
     private void onPacketReceived(byte[] raw, int len) {
-        int payloadLen = len - (PACKET_RSSI ? 1 : 0);
-        if (payloadLen < 0) {
+        LoRaPacket packet = LoRaPacket.fromBytes(raw, len, PACKET_RSSI);
+        if (packet == null) {
             System.err.println("Frame too short");
             return;
         }
-
-        byte[] payload = new byte[payloadLen];
-        System.arraycopy(raw, 0, payload, 0, payloadLen);
-
-        System.out.printf("Payload (%d bytes): %s%n", payloadLen,
-                          bytesToHex(payload));
-
-        if (PACKET_RSSI) {
-            int rssi = -(256 - (raw[len - 1] & 0xFF));
-            System.out.printf("Packet RSSI: %d dBm%n", rssi);
-        }
-    }
-
-    private static String bytesToHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02X ", b));
-        }
-        return sb.toString().trim();
+        System.out.println(packet);
     }
 
     public E22Config getE22Config() { return cfg; }
@@ -318,21 +300,22 @@ public class LoRaHAT {
         public String toString() {
             StringBuilder sb = new StringBuilder();
             byte[] b = toBytes();
-            sb.append(String.format("cmd          : 0x%02X (%s)\n", b[0] & 0xFF,
+            sb.append("E22Config:\n");
+            sb.append(String.format("Cmd          : 0x%02X (%s)\n", b[0] & 0xFF,
                                     persist ? "persist" : "temporary"));
-            sb.append(String.format("own address  : 0x%04X\n", ownAddr));
-            sb.append(String.format("net id       : 0x%02X\n", netId));
-            sb.append(String.format("baud         : %s\n", baud));
-            sb.append(String.format("air speed    : %s\n", airSpeed));
-            sb.append(String.format("buffer size  : %s\n", bufferSize));
-            sb.append(String.format("power        : %s\n", power));
-            sb.append(String.format("channel rssi : %s\n", channelRssi));
-            sb.append(String.format("channel      : %d (%.3f MHz)\n", channel,
+            sb.append(String.format("Own address  : 0x%04X\n", ownAddr));
+            sb.append(String.format("Net id       : 0x%02X\n", netId));
+            sb.append(String.format("Baud         : %s\n", baud));
+            sb.append(String.format("Air speed    : %s\n", airSpeed));
+            sb.append(String.format("Buffer size  : %s\n", bufferSize));
+            sb.append(String.format("Power        : %s\n", power));
+            sb.append(String.format("Channel RSSI : %s\n", channelRssi));
+            sb.append(String.format("Channel      : %d (%.3f MHz)\n", channel,
                                     850.125 + channel));
-            sb.append(String.format("transfer     : %s\n", transferMethod));
-            sb.append(String.format("packet rssi  : %s\n", packetRssi));
-            sb.append(String.format("crypt        : 0x%04X\n", crypt));
-            sb.append("raw bytes    : ");
+            sb.append(String.format("Transfer     : %s\n", transferMethod));
+            sb.append(String.format("Packet RSSI  : %s\n", packetRssi));
+            sb.append(String.format("Crypt        : 0x%04X\n", crypt));
+            sb.append("Raw bytes    : ");
             for (byte byt : b)
                 sb.append(String.format("%02X ", byt & 0xFF));
             return sb.toString().trim();
