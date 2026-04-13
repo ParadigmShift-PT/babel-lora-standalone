@@ -50,7 +50,7 @@ public class LoRaHAT {
 
         this.cfg = new E22Config.Builder()
                             .persist(true)
-                            .transferMethod(TransferMethod.FIXED)
+                            .transferMethod(TransferMethod.TRANSPARENT)
                             .ownAddress(ownAddr)
                             .netId(0x00)
                             .baud(Baud.B9600)
@@ -136,6 +136,8 @@ public class LoRaHAT {
     }
 
     public void send(int recipientAddr, byte[] payload) {
+        System.out.println("Sending packet to: " +
+                   String.format("0x%02X", recipientAddr));
         byte[] frame = new byte[3 + payload.length];
         frame[0] = (byte)(recipientAddr >> 8);
         frame[1] = (byte)(recipientAddr & 0xFF);
@@ -306,7 +308,7 @@ public class LoRaHAT {
                 bufferSize.value | power.value | (channelRssi ? 0x20 : 0x00);
             int reg6 = (packetRssi ? 0x80 : 0x00) | transferMethod.value | 0x43;
 
-            int useAddr = transferMethod == TransferMethod.TRANSPARENT ? 0x000 : ownAddr;
+            int useAddr = transferMethod == TransferMethod.TRANSPARENT ? 0xFFFF : ownAddr;
 
             return new byte[] {(byte)cmd,
                                (byte)0x00,
