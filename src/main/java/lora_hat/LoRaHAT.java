@@ -27,7 +27,9 @@ public class LoRaHAT {
     private DigitalOutput m1;
     private static final int M1_PIN = 27;
 
-    public LoRaHAT(Context pi4j, int ownAddr, String serialPort) {
+    private final E22Config cfg;
+
+	public LoRaHAT(Context pi4j, int ownAddr, String serialPort) {
         this(pi4j, (short)ownAddr, serialPort);
     }
 
@@ -45,6 +47,21 @@ public class LoRaHAT {
                                   .address(M1_PIN)
                                   .initial(DigitalState.LOW)
                                   .build());
+
+        this.cfg = new E22Config.Builder()
+                            .persist(true)
+                            .transferMethod(TransferMethod.FIXED)
+                            .ownAddress(ownAddr)
+                            .netId(0x00)
+                            .baud(Baud.B9600)
+                            .airSpeed(AirSpeed.BPS_2400)
+                            .bufferSize(BufferSize.BYTES_240)
+                            .power(Power.DBM_22)
+                            .channelRssi(true)
+                            .channel(18)
+                            .packetRssi(true)
+                            .crypt(0x0000)
+                            .build();
 
         this.ownAddr = ownAddr;
         this.port = SerialPort.getCommPort(serialPort);
@@ -66,21 +83,6 @@ public class LoRaHAT {
         Thread.sleep(1000);
 
         port.flushIOBuffers();
-
-        E22Config cfg = new E22Config.Builder()
-                            .persist(true)
-                            .transferMethod(TransferMethod.TRANSPARENT)
-                            .ownAddress(ownAddr)
-                            .netId(0x00)
-                            .baud(Baud.B9600)
-                            .airSpeed(AirSpeed.BPS_2400)
-                            .bufferSize(BufferSize.BYTES_240)
-                            .power(Power.DBM_22)
-                            .channelRssi(true)
-                            .channel(18)
-                            .packetRssi(true)
-                            .crypt(0x0000)
-                            .build();
 
         byte[] cfg_bytes = cfg.toBytes();
         System.out.print("Config bytes: ");
@@ -201,6 +203,10 @@ public class LoRaHAT {
         }
         return sb.toString().trim();
     }
+
+    public E22Config getE22Config() {
+		return cfg;
+	}
 
     public static class E22Config {
 
