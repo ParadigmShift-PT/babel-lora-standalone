@@ -1,14 +1,14 @@
-package lora_hat;
+package lora;
 
 import com.fazecast.jSerialComm.SerialPort;
 import com.pi4j.context.Context;
 import com.pi4j.io.gpio.digital.DigitalOutput;
 import com.pi4j.io.gpio.digital.DigitalState;
-import lora_hat.LoRaHAT.E22Config.AirSpeed;
-import lora_hat.LoRaHAT.E22Config.Baud;
-import lora_hat.LoRaHAT.E22Config.BufferSize;
-import lora_hat.LoRaHAT.E22Config.Power;
-import lora_hat.LoRaHAT.E22Config.TransferMethod;
+import lora.LoRaHAT.E22Config.AirSpeed;
+import lora.LoRaHAT.E22Config.Baud;
+import lora.LoRaHAT.E22Config.BufferSize;
+import lora.LoRaHAT.E22Config.Power;
+import lora.LoRaHAT.E22Config.TransferMethod;
 
 public class LoRaHAT {
     private static final int START_FREQ = 850;
@@ -16,24 +16,19 @@ public class LoRaHAT {
     private static final int FREQ_OFFSET = FREQ_MHZ - START_FREQ;
     private static final int BROADCAST_ADDR = 0xFFFF;
     private static final boolean PACKET_RSSI = true;
-    private final short ownAddr;
 
     private final SerialPort port;
     private volatile boolean running = false;
     private Thread readerThread;
 
-    private DigitalOutput m0;
+    private final DigitalOutput m0;
     private static final int M0_PIN = 22;
-    private DigitalOutput m1;
+    private final DigitalOutput m1;
     private static final int M1_PIN = 27;
 
     private final E22Config cfg;
 
-	public LoRaHAT(Context pi4j, int ownAddr, String serialPort) {
-        this(pi4j, (short)ownAddr, serialPort);
-    }
-
-    public LoRaHAT(Context pi4j, short ownAddr, String serialPort) {
+    public LoRaHAT(Context pi4j, E22Config cfg, String serialPort) {
         this.m0 = pi4j.create(DigitalOutput.newConfigBuilder(pi4j)
                                   .id("M0")
                                   .name("M0")
@@ -47,29 +42,36 @@ public class LoRaHAT {
                                   .address(M1_PIN)
                                   .initial(DigitalState.LOW)
                                   .build());
-
-        this.cfg = new E22Config.Builder()
-                            .persist(true)
-                            .transferMethod(TransferMethod.TRANSPARENT)
-                            .ownAddress(ownAddr)
-                            .netId(0x00)
-                            .baud(Baud.B9600)
-                            .airSpeed(AirSpeed.BPS_2400)
-                            .bufferSize(BufferSize.BYTES_240)
-                            .power(Power.DBM_22)
-                            .channelRssi(true)
-                            .channel(18)
-                            .packetRssi(true)
-                            .crypt(0x0000)
-                            .build();
-
-        this.ownAddr = ownAddr;
+        this.cfg = cfg;
         this.port = SerialPort.getCommPort(serialPort);
         this.port.setBaudRate(9600);
         this.port.setNumDataBits(8);
         this.port.setNumStopBits(SerialPort.ONE_STOP_BIT);
         this.port.setParity(SerialPort.NO_PARITY);
         this.port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
+    }
+
+    public LoRaHAT(Context pi4j, short ownAddr, String serialPort) {
+        this(pi4j,
+             new E22Config.Builder()
+                 .persist(true)
+                 .transferMethod(TransferMethod.TRANSPARENT)
+                 .ownAddress(ownAddr)
+                 .netId(0x00)
+                 .baud(Baud.B9600)
+                 .airSpeed(AirSpeed.BPS_2400)
+                 .bufferSize(BufferSize.BYTES_240)
+                 .power(Power.DBM_22)
+                 .channelRssi(true)
+                 .channel(18)
+                 .packetRssi(true)
+                 .crypt(0x0000)
+                 .build(),
+             serialPort);
+    }
+
+    public LoRaHAT(Context pi4j, int ownAddr, String serialPort) {
+        this(pi4j, (short)ownAddr, serialPort);
     }
 
     public void init() throws InterruptedException {
@@ -101,19 +103,6 @@ public class LoRaHAT {
         System.out.println("Read " + read + " bytes, first: " +
                            String.format("0x%02X", response[0] & 0xFF));
         port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
-        // int available = port.bytesAvailable();
-        // if (available > 0) {
-        // byte[] response = new byte[available];
-        // port.readBytes(response, available);
-        // if (response[0] != (byte)0xC1) {
-        // throw new RuntimeException(
-        // "Config failed, unexpected response: " +
-        // String.format("0x%02X", response[0] & 0xFF));
-        // }
-        // } else {
-        // throw new RuntimeException(
-        // "No response from hat during configuration");
-        // }
 
         m0.state(DigitalState.LOW);
         m1.state(DigitalState.LOW);
@@ -137,12 +126,17 @@ public class LoRaHAT {
 
     public void send(int recipientAddr, byte[] payload) {
         System.out.println("Sending packet to: " +
-                   String.format("0x%02X", recipientAddr));
+                           String.format("0x%02X", recipientAddr));
         byte[] frame = new byte[3 + payload.length];
         frame[0] = (byte)(recipientAddr >> 8);
         frame[1] = (byte)(recipientAddr & 0xFF);
         frame[2] = (byte)FREQ_OFFSET;
         System.arraycopy(payload, 0, frame, 3, payload.length);
+        port.writeBytes(frame, frame.length);
+    }
+
+    public void transmit(LoRaPacket packet) {
+        byte[] frame = packet.toBytes();
         port.writeBytes(frame, frame.length);
     }
 
@@ -206,9 +200,7 @@ public class LoRaHAT {
         return sb.toString().trim();
     }
 
-    public E22Config getE22Config() {
-		return cfg;
-	}
+    public E22Config getE22Config() { return cfg; }
 
     public static class E22Config {
 
@@ -308,13 +300,11 @@ public class LoRaHAT {
                 bufferSize.value | power.value | (channelRssi ? 0x20 : 0x00);
             int reg6 = (packetRssi ? 0x80 : 0x00) | transferMethod.value | 0x43;
 
-            int useAddr = transferMethod == TransferMethod.TRANSPARENT ? 0xFFFF : ownAddr;
-
             return new byte[] {(byte)cmd,
                                (byte)0x00,
                                (byte)0x09,
-                               (byte)(useAddr >> 8),
-                               (byte)(useAddr & 0xFF),
+                               (byte)(ownAddr >> 8),
+                               (byte)(ownAddr & 0xFF),
                                (byte)(netId & 0xFF),
                                (byte)reg3,
                                (byte)reg4,
@@ -331,9 +321,6 @@ public class LoRaHAT {
             sb.append(String.format("cmd          : 0x%02X (%s)\n", b[0] & 0xFF,
                                     persist ? "persist" : "temporary"));
             sb.append(String.format("own address  : 0x%04X\n", ownAddr));
-            if (transferMethod == TransferMethod.TRANSPARENT) {
-                sb.append(String.format("\t\t^ unused due to transfer method\n"));
-            }
             sb.append(String.format("net id       : 0x%02X\n", netId));
             sb.append(String.format("baud         : %s\n", baud));
             sb.append(String.format("air speed    : %s\n", airSpeed));
