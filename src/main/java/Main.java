@@ -27,7 +27,7 @@ public class Main {
                         RpiSpiProvider.newInstance())
                 .build();
 
-        LoRaHAT hat = new LoRaHAT(pi4j, "/dev/serial0");
+        LoRaHAT hat = new LoRaHAT(pi4j, 0x1234,"/dev/serial0");
         hat.init();
 
         while (1 > 0) {
