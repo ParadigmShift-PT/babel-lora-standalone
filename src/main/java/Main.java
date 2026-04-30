@@ -26,20 +26,20 @@ public class Main {
                                 RpiSpiProvider.newInstance())
                            .build();
 
-        LoRaHAT hat = new LoRaHAT(pi4j, 0x1234, "/dev/serial0");
+        LoRaHAT hat = new LoRaHAT(pi4j, 0x1234, "/dev/AMA0");
         hat.init();
 
         LoRaPacket bcast_packet =
             new LoRaPacket.Builder().payload("hello 123").build();
 
         LoRaPacket addressed_packet =
-            new LoRaPacket.Builder().payload("hello").recipient(0x4321).build();
+            new LoRaPacket.Builder().payload("hello").destination(0x4321).build();
 
         while (1 > 0) {
             System.out.println("tryin to broadcast");
             // hat.broadcast("123456789".getBytes(StandardCharsets.US_ASCII));
             hat.transmit(bcast_packet);
-            hat.transmit(addressed_packet);
+            // hat.transmit(addressed_packet);
             Thread.sleep(1000);
         }
     }

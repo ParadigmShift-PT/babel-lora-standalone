@@ -135,9 +135,25 @@ public class LoRaHAT {
         port.writeBytes(frame, frame.length);
     }
 
-    public void transmit(LoRaPacket packet) {
-        byte[] frame = packet.toBytes();
+    private void transmitFixed(LoRaPacket packet) {
+        byte[] packetBytes = packet.toBytes();
+        byte[] frame = new byte[3 + packetBytes.length];
+        frame[0] = (byte)(packet.getDestAddr() >> 8);
+        frame[1] = (byte)(packet.getDestAddr() & 0xFF);
+        frame[2] = (byte)(packet.getChannel() & 0xFF);
+
+        System.arraycopy(packetBytes, 0, frame, 3, packetBytes.length);
         port.writeBytes(frame, frame.length);
+    }
+
+    public void transmit(LoRaPacket packet) {
+        if (this.cfg.transferMethod == TransferMethod.FIXED) {
+            transmitFixed(packet);
+            return;
+        }
+
+        byte[] packetBytes = packet.toBytes();
+        port.writeBytes(packetBytes, packetBytes.length);
     }
 
     public void broadcast(byte[] payload) { send(BROADCAST_ADDR, payload); }
