@@ -26,7 +26,7 @@ public class Main {
                                 RpiSpiProvider.newInstance())
                            .build();
 
-        LoRaHAT hat = new LoRaHAT(pi4j, 0x1234, "/dev/AMA0");
+        LoRaHAT hat = new LoRaHAT(pi4j, 0x1234, "/dev/ttyAMA0");
         hat.init();
 
         LoRaPacket bcast_packet =
