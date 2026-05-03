@@ -59,34 +59,33 @@ public class LoRaPacket {
         return frame;
     }
 
-    public static LoRaPacket fromBytes(byte[] raw, int len,
-                                       boolean packetRssi) {
-        final int headerLen = 8;
-        if (raw == null || len < headerLen) {
-            return null;
-        }
+    public static LoRaPacket fromBytes(byte[] raw, int len, boolean packetRssi) {
+    final int headerLen = 8;
+    if (raw == null || len < headerLen) {
+        return null;
+    }
 
-        int frameLen = packetRssi ? len - 1 : len;
-        if (frameLen < headerLen) {
-            return null;
-        }
+    int frameLen = packetRssi ? len - 1 : len;
+    if (frameLen < headerLen) {
+        return null;
+    }
 
-        int destAddr = (raw[0] & 0xFF) | ((raw[1] & 0xFF) << 8);
-        int channel = raw[2] & 0xFF;
-        int originAddr = (raw[3] & 0xFF) | ((raw[4] & 0xFF) << 8);
-        int prevHopAddr = (raw[5] & 0xFF) | ((raw[6] & 0xFF) << 8);
-        int payloadLen = raw[7] & 0xFF;
+    int destAddr    = (raw[0] & 0xFF) | ((raw[1] & 0xFF) << 8);
+    int channel     =  raw[2] & 0xFF;
+    int originAddr  = (raw[3] & 0xFF) | ((raw[4] & 0xFF) << 8);
+    int prevHopAddr = (raw[5] & 0xFF) | ((raw[6] & 0xFF) << 8);
+    int payloadLen  =  raw[7] & 0xFF;
 
-        if (headerLen + payloadLen > frameLen) {
-            return null;
-        }
+    // if (headerLen + payloadLen > frameLen) {
+    //     return null;
+    // }
 
-        byte[] payload = new byte[payloadLen];
-        System.arraycopy(raw, headerLen, payload, 0, payloadLen);
+    byte[] payload = new byte[payloadLen];
+    System.arraycopy(raw, headerLen, payload, 0, payloadLen);
 
-        int rssi = packetRssi ? (raw[len - 1] & 0xFF) - 256 : 0;
+    int rssi = packetRssi ? (raw[len - 1] & 0xFF) - 256 : 0;
 
-        return new Builder()
+    return new Builder()
             .destination(destAddr)
             .channel(channel)
             .origin(originAddr)
@@ -94,7 +93,7 @@ public class LoRaPacket {
             .payload(payload)
             .rssi(rssi)
             .build();
-    }
+}
 
     @Override
     public String toString() {

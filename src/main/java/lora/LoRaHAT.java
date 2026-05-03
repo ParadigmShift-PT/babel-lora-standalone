@@ -55,7 +55,7 @@ public class LoRaHAT {
         this(pi4j,
              new E22Config.Builder()
                  .persist(true)
-                 .transferMethod(TransferMethod.TRANSPARENT)
+                 .transferMethod(TransferMethod.FIXED)
                  .ownAddress(ownAddr)
                  .netId(0x00)
                  .baud(Baud.B9600)
@@ -64,7 +64,7 @@ public class LoRaHAT {
                  .power(Power.DBM_22)
                  .channelRssi(true)
                  .channel(18)
-                 .packetRssi(true)
+                 .packetRssi(PACKET_RSSI)
                  .crypt(0x0000)
                  .build(),
              serialPort);
