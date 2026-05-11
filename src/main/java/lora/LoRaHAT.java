@@ -4,6 +4,7 @@ import com.fazecast.jSerialComm.SerialPort;
 import com.pi4j.context.Context;
 import com.pi4j.io.gpio.digital.DigitalOutput;
 import com.pi4j.io.gpio.digital.DigitalState;
+import java.util.function.Consumer;
 import lora.LoRaHAT.E22Config.AirSpeed;
 import lora.LoRaHAT.E22Config.Baud;
 import lora.LoRaHAT.E22Config.BufferSize;
@@ -27,6 +28,8 @@ public class LoRaHAT {
     private static final int M1_PIN = 27;
 
     private final E22Config cfg;
+
+    private volatile Consumer<LoRaPacket> packetHandler;
 
     public LoRaHAT(Context pi4j, E22Config cfg, String serialPort) {
         this.m0 = pi4j.create(DigitalOutput.newConfigBuilder(pi4j)
@@ -189,13 +192,34 @@ public class LoRaHAT {
         }
     }
 
+    /**
+     * Registers a callback that will receive every successfully parsed
+     * {@link LoRaPacket} delivered by the reader thread. The callback runs on
+     * that reader thread; consumers must therefore be thread-safe (or hand off
+     * to their own queue/loop). Passing {@code null} clears the handler and
+     * restores the default {@code System.out} dump behaviour.
+     */
+    public void setPacketHandler(Consumer<LoRaPacket> handler) {
+        this.packetHandler = handler;
+    }
+
     private void onPacketReceived(byte[] raw, int len) {
         LoRaPacket packet = LoRaPacket.fromBytes(raw, len, PACKET_RSSI);
         if (packet == null) {
             System.err.println("Frame too short");
             return;
         }
-        System.out.println(packet);
+        Consumer<LoRaPacket> h = this.packetHandler;
+        if (h != null) {
+            try {
+                h.accept(packet);
+            } catch (Exception e) {
+                System.err.println("LoRa packet handler threw: " + e);
+                e.printStackTrace();
+            }
+        } else {
+            System.out.println(packet);
+        }
     }
 
     public E22Config getE22Config() { return cfg; }
