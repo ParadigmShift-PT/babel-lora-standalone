@@ -25,6 +25,29 @@ The artifact is intended to back a future Babel protocol providing LoRa connecti
 
 The driver puts the radio into **configuration mode** (M0=LOW, M1=HIGH) to write a 12-byte register block on startup, then drops to **normal mode** (M0=LOW, M1=LOW) and spawns a daemon reader thread.
 
+### Raspberry Pi prerequisites
+
+Enable the **serial port hardware** but keep the **serial console** disabled, otherwise the Pi will hold `/dev/ttyAMA0` for getty and the driver will not be able to open it:
+
+```bash
+sudo raspi-config
+#   3 Interface Options
+#   → I6 Serial Port
+#       "Would you like a login shell to be accessible over serial?" → No
+#       "Would you like the serial port hardware to be enabled?"     → Yes
+sudo reboot
+```
+
+After reboot, `ls -l /dev/ttyAMA0` should show the device and `systemctl status serial-getty@ttyAMA0` should report it as disabled / inactive.
+
+On Raspberry Pi 5 (and recent Pi OS images) `raspi-config` alone does not always wire `/dev/ttyAMA0` to the primary UART — append the following block to the end of `/boot/firmware/config.txt` and reboot:
+
+```ini
+[all]
+dtparam=uart0=on
+enable_uart=1
+```
+
 ## Wire format
 
 `LoRaPacket` carries an 8-byte header followed by the payload:
