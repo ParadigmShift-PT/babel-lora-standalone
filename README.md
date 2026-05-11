@@ -166,12 +166,6 @@ git push origin v0.2.0
 
 ---
 
-## Vendored reference code
-
-The `SX126X_LoRa_HAT_CODE/` directory contains the upstream Waveshare reference drivers (Python for Raspberry Pi, plus STM32 and Windows variants) kept for documentation and as a cross-check when interpreting the E22's register layout. It is **not** built or shipped — none of it is on the classpath.
-
----
-
 ## License
 
 Copyright (c) 2026 ParadigmShift, Lda. See [LICENSE](LICENSE) for full terms.
