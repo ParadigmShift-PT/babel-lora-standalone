@@ -176,7 +176,20 @@ mvn deploy    # publish to maven.paradigmshift.pt (requires REPOSILITE_TOKEN)
 mvn exec:java -Dexec.mainClass=Main
 ```
 
-(The existing `Makefile` is left over from an earlier shaded-jar build and will not work against this pom — replace or delete as you prefer.)
+Alternatively, the `executable` Maven profile produces a self-contained fat JAR with `Main` wired as the entry point in the manifest. This jar is intended **only for local testing on a Pi** — the profile disables `install`/`deploy`, so it is never published to the ParadigmShift Maven repository:
+
+```bash
+mvn clean package -P executable
+java -jar target/babel-lora-0.2.0-executable.jar
+```
+
+The accompanying `Makefile` is a shortcut for the same flow:
+
+```bash
+make build    # mvn clean package -P executable
+make run      # java -jar target/babel-lora-0.2.0-executable.jar
+make          # build + run
+```
 
 ## Releasing
 
