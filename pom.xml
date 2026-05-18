@@ -6,7 +6,7 @@
 
     <groupId>pt.paradigmshift.iot</groupId>
     <artifactId>babel-lora</artifactId>
-    <version>0.2.0</version>
+    <version>0.2.2</version>
     <name>Babel LoRa</name>
     <description>
         A Java driver for the Waveshare SX126X LoRa HAT (EByte E22-900T22S module)
