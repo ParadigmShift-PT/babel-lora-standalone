@@ -190,7 +190,7 @@ mvn deploy    # publish to maven.paradigmshift.pt (requires REPOSILITE_TOKEN)
 
 ### Smoke test on a Pi
 
-`Main.java` is a smoke-test entry point — it builds a Pi4J context, opens the HAT at `ownAddress = 0x4321`, and by default transmits a small unicast packet to `0x8AEF` every second while the reader thread prints any frames that arrive over the air. To run it on a Pi after building:
+`Main.java` is a smoke-test entry point — it builds a Pi4J context, opens the HAT at `ownAddress = 0x4321`, and by default broadcasts a small packet every second while the reader thread prints any frames that arrive over the air. To run it on a Pi after building:
 
 ```bash
 mvn exec:java -Dexec.mainClass=Main
@@ -203,10 +203,19 @@ mvn clean package -P executable
 java -jar target/babel-lora-0.2.0-executable.jar
 ```
 
-Pass `rx-only` (or `--rx-only` / `no-tx`) as the first argument to disable transmission and use the program as a pure receiver — handy when diagnosing whether received frames are genuine over-the-air traffic from another device or are somehow tied to this Pi's own TX cycle:
+Two CLI flags are recognised (any order):
+
+| Flag | Effect |
+|---|---|
+| `--rx-only` (also `rx-only` / `no-tx`) | Disable transmission and use the program as a pure receiver — handy when diagnosing whether received frames are genuine over-the-air traffic from another device or are somehow tied to this Pi's own TX cycle. |
+| `--dest-addr <hex>` | Unicast every TX packet to the given 16-bit address (e.g. `0x8AEF` or `8AEF`) instead of broadcasting. Useful for bidirectional smoke tests between two Pis. Ignored when `--rx-only` is set. |
+
+Examples:
 
 ```bash
-java -jar target/babel-lora-0.2.0-executable.jar rx-only
+java -jar target/babel-lora-0.2.0-executable.jar                          # broadcast every 1 s
+java -jar target/babel-lora-0.2.0-executable.jar --dest-addr 0x8AEF       # unicast to 0x8AEF
+java -jar target/babel-lora-0.2.0-executable.jar --rx-only                # pure receiver
 ```
 
 Combine with `-Dlora.debug=true` to also get reader-thread instrumentation (read counts, accumulator depth) every 100 loop iterations.
