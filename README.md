@@ -135,12 +135,23 @@ hat.setPacketHandler(packet -> {
 
 ### Receive behaviour and loss guarantees
 
-The reader thread uses **length-prefixed framing** off the `payload_len` byte at offset 7 of the wire format, not a time-based gap. Concretely:
+The reader thread uses **semi-blocking serial reads** combined with **length-prefixed framing** off the `payload_len` byte at offset 7 of the wire format. Concretely:
 
+- **Direct reads, no `bytesAvailable()` polling.** The serial port is configured for SEMI_BLOCKING mode (100 ms read timeout). Each iteration calls `readBytes()` directly: it returns as soon as the kernel UART buffer has at least one byte, or after the timeout. This deliberately bypasses `bytesAvailable()` — jSerialComm's cached available-byte counter has been observed to stick at zero on Linux under sustained traffic, silently starving the reader. Asking the OS for bytes on every iteration avoids that failure mode.
 - **Back-to-back frames are all delivered.** When the kernel UART buffer hands the reader several concatenated frames in a single chunk (e.g. after a brief JVM stall), every complete frame is carved out and delivered in order; only a trailing partial frame stays in the accumulator until its remaining bytes arrive.
 - **The accumulator is 1 KiB.** The hard upper bound on a single E22 frame is 249 bytes (240-byte max payload + 8-byte `lora_frame_t` header + 1 RSSI byte), so 1 KiB gives several frames of headroom. Reads are clamped to the free space remaining in the accumulator — if a stalled JVM wakes up to a full kernel queue, the leftover bytes simply stay in the kernel and are picked up on the next iteration.
-- **Two safety nets exist, neither of which can drop deliverable data.** A *buffer-overflow* path resets the accumulator when a partial frame somehow grows past 1 KiB (only reachable with a corrupt `payload_len` byte or sustained line noise). An *idle-timeout* path (50 ms — well above the ~1 ms inter-byte gap on a 9600-baud UART) drops stranded partial-frame bytes once the radio has clearly stopped streaming them. In both cases, every complete frame already in the buffer has been delivered before the drop is considered.
+- **Two safety nets exist, neither of which can drop deliverable data.** A *buffer-overflow* path resets the accumulator when a partial frame somehow grows past 1 KiB (only reachable with a corrupt `payload_len` byte or sustained line noise). An *idle-timeout* path (200 ms — well above the ~1 ms inter-byte gap on a 9600-baud UART) drops stranded partial-frame bytes once the radio has clearly stopped streaming them. In both cases, every complete frame already in the buffer has been delivered before the drop is considered.
 - **The reader thread survives transient errors.** Any unexpected exception inside the loop is logged, the accumulator is reset, and reception continues. A single bad iteration no longer silently kills the thread.
+
+### Debug logging
+
+If reception still stalls, run the smoke test with `-Dlora.debug=true`:
+
+```bash
+java -Dlora.debug=true -jar target/babel-lora-0.2.0-executable.jar
+```
+
+The reader thread will then emit a line every 100 iterations reporting the most recent `readBytes()` return value and the current accumulator depth. This makes it possible to distinguish *"the thread died"* (no log lines at all) from *"the OS keeps returning zero bytes"* (`read=0` indefinitely), which point at very different root causes — the former is a Java-side bug, the latter is a kernel UART or radio-side issue.
 
 ### Custom radio configuration
 

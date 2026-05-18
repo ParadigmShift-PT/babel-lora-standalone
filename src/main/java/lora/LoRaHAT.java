@@ -105,7 +105,16 @@ public class LoRaHAT {
         int read = port.readBytes(response, 12);
         System.out.println("Read " + read + " bytes, first: " +
                            String.format("0x%02X", response[0] & 0xFF));
-        port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
+
+        // Switch to SEMI_BLOCKING for the reader thread: readBytes() returns
+        // when at least one byte is available, or when the read timeout
+        // (RX_READ_TIMEOUT_MS) expires. This bypasses bytesAvailable() —
+        // jSerialComm's cached available-byte count has been observed to get
+        // stuck at zero on Linux after sustained reads, even though the
+        // kernel UART buffer still has data. Direct reads do not rely on
+        // that count.
+        port.setComPortTimeouts(SerialPort.TIMEOUT_READ_SEMI_BLOCKING,
+                                RX_READ_TIMEOUT_MS, 0);
 
         m0.state(DigitalState.LOW);
         m1.state(DigitalState.LOW);
@@ -170,18 +179,39 @@ public class LoRaHAT {
     // wire in practice.
     private static final int RX_BUFFER_SIZE = 1024;
 
+    // SEMI_BLOCKING read timeout: how long readBytes() will wait for at least
+    // one byte before returning 0. 100 ms is short enough that interruption /
+    // shutdown is responsive, and long enough that the loop does not spin
+    // when the radio is genuinely idle.
+    private static final int RX_READ_TIMEOUT_MS = 100;
+
     // How long we tolerate a partial (un-parseable) buffer before declaring it
     // garbage and resyncing. At 9600 baud each UART byte arrives ~1 ms apart,
-    // so a 50 ms gap with bytes still buffered means the radio has stopped
+    // so a 200 ms gap with bytes still buffered means the radio has stopped
     // streaming this frame — either it was a corrupt header, line noise, or
-    // we got out of sync. 50 ms is well below the inter-packet gap of any
-    // realistic LoRa traffic pattern, so this only fires on actual corruption.
-    private static final long FRAME_IDLE_TIMEOUT_MS = 50;
+    // we got out of sync. Generous enough to swallow any inter-byte jitter
+    // while still recovering quickly from real corruption.
+    private static final long FRAME_IDLE_TIMEOUT_MS = 200;
+
+    // Verbose per-iteration logging. Toggle with -Dlora.debug=true at JVM
+    // startup. Off by default; useful when diagnosing why the reader is not
+    // producing frames.
+    private static final boolean DEBUG = Boolean.getBoolean("lora.debug");
 
     /**
      * Reader-thread loop. Drains the serial port, parses one or more
      * {@link LoRaPacket}s out of every chunk read, and delivers them to the
      * registered packet handler (or {@link System#out} if none is set).
+     *
+     * <h3>Why direct reads instead of bytesAvailable()</h3>
+     * The serial port is configured for SEMI_BLOCKING reads in
+     * {@link #init()}: {@code port.readBytes()} returns as soon as at least
+     * one byte is available, or after {@link #RX_READ_TIMEOUT_MS} ms with no
+     * data. This deliberately avoids {@code bytesAvailable()}, whose cached
+     * available-byte count has been observed to stick at zero on Linux even
+     * while the kernel UART FIFO still has bytes — which would silently
+     * starve the reader. Direct reads ask the OS for bytes every iteration
+     * and never get out of sync.
      *
      * <h3>Framing</h3>
      * The wire format is length-prefixed: byte 7 of every frame carries the
@@ -216,70 +246,72 @@ public class LoRaHAT {
      */
     private void readLoop() {
         byte[] accumulator = new byte[RX_BUFFER_SIZE];
+        byte[] chunk = new byte[RX_BUFFER_SIZE];
         int acc = 0;              // valid bytes currently in `accumulator`
         long lastByteTime = 0;    // timestamp of the most recent serial read
+        long iterations = 0;      // diagnostic counter — only used with DEBUG
 
         while (running && !Thread.currentThread().isInterrupted()) {
             try {
-                // 1) Pull whatever the kernel has buffered into our own
-                //    accumulator. Bound the copy to the remaining buffer space
-                //    so a stalled JVM that wakes up to a full kernel queue
-                //    cannot overflow `accumulator`. Any bytes we leave behind
-                //    are picked up on the next iteration — nothing is lost.
-                int available = port.bytesAvailable();
-                if (available > 0) {
-                    int room = RX_BUFFER_SIZE - acc;
-                    if (room <= 0) {
-                        // Buffer is wedged — see the loss-guarantees note in
-                        // the Javadoc above. Reset and resync.
-                        System.err.println("LoRa reader: RX buffer full (" +
-                                           RX_BUFFER_SIZE +
-                                           " bytes), resyncing");
-                        acc = 0;
-                        room = RX_BUFFER_SIZE;
-                    }
-                    int toRead = Math.min(available, room);
-                    byte[] chunk = new byte[toRead];
-                    int read = port.readBytes(chunk, toRead);
-                    if (read > 0) {
-                        System.arraycopy(chunk, 0, accumulator, acc, read);
-                        acc += read;
-                        lastByteTime = System.currentTimeMillis();
-                    }
+                // 1) Reserve space in the accumulator. A partial frame that
+                //    has somehow grown past RX_BUFFER_SIZE is, by definition,
+                //    not parseable (max legitimate frame is 249 bytes) — log
+                //    and resync. The drain loop runs on every iteration where
+                //    we read bytes, so no complete frames can be sitting in
+                //    the accumulator when this fires.
+                int room = RX_BUFFER_SIZE - acc;
+                if (room <= 0) {
+                    System.err.println("LoRa reader: RX buffer wedged on a " +
+                                       "partial frame > " + RX_BUFFER_SIZE +
+                                       " bytes, resyncing");
+                    acc = 0;
+                    room = RX_BUFFER_SIZE;
                 }
 
-                // 2) Drain every complete frame currently in the accumulator.
-                //    This is the key to lossless delivery when several frames
-                //    arrive back-to-back: we keep slicing off complete frames
-                //    (and compacting the remainder to the front of the
-                //    buffer) until only a partial frame — or nothing — is
-                //    left.
-                int consumed;
-                while ((consumed = tryDeliverOneFrame(accumulator, acc)) > 0) {
-                    int remaining = acc - consumed;
-                    if (remaining > 0) {
-                        System.arraycopy(accumulator, consumed, accumulator, 0,
-                                         remaining);
-                    }
-                    acc = remaining;
+                // 2) Semi-blocking read: returns as soon as >=1 byte is
+                //    available, or after RX_READ_TIMEOUT_MS with no data.
+                //    No reliance on bytesAvailable(); no busy-wait sleep.
+                int read = port.readBytes(chunk, room);
+
+                if (DEBUG && (++iterations % 100) == 0) {
+                    System.err.println("[lora-reader] read=" + read +
+                                       " acc=" + acc + " iter=" + iterations);
                 }
 
-                // 3) Nothing to read this tick. Either we are between frames
-                //    (acc == 0, just sleep), or we have a stranded partial
-                //    frame that has been idle too long — drop and resync.
-                if (available <= 0) {
-                    if (acc > 0 && System.currentTimeMillis() - lastByteTime >
-                                       FRAME_IDLE_TIMEOUT_MS) {
-                        System.err.println("LoRa reader: dropping " + acc +
-                                           " unparseable byte(s) after idle");
-                        acc = 0;
-                    } else {
-                        Thread.sleep(5);
+                if (read > 0) {
+                    System.arraycopy(chunk, 0, accumulator, acc, read);
+                    acc += read;
+                    lastByteTime = System.currentTimeMillis();
+
+                    // 3) Drain every complete frame in the accumulator. This
+                    //    is the key to lossless delivery when several frames
+                    //    arrive back-to-back: we keep slicing off complete
+                    //    frames (and compacting the remainder to the front
+                    //    of the buffer) until only a partial frame — or
+                    //    nothing — is left.
+                    int consumed;
+                    while ((consumed = tryDeliverOneFrame(accumulator, acc)) >
+                           0) {
+                        int remaining = acc - consumed;
+                        if (remaining > 0) {
+                            System.arraycopy(accumulator, consumed,
+                                             accumulator, 0, remaining);
+                        }
+                        acc = remaining;
                     }
+                } else if (acc > 0 &&
+                           System.currentTimeMillis() - lastByteTime >
+                               FRAME_IDLE_TIMEOUT_MS) {
+                    // 4) The read timeout fired and the bytes we already
+                    //    have have not been touched for too long — they
+                    //    cannot grow into a complete frame. Drop them and
+                    //    resync.
+                    System.err.println("LoRa reader: dropping " + acc +
+                                       " unparseable byte(s) after idle");
+                    acc = 0;
                 }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
+                // If read == 0 and acc == 0, the radio is simply idle —
+                // loop and wait for the next read timeout.
             } catch (Exception e) {
                 // Catching inside the loop is deliberate: an arraycopy or
                 // parse error must not terminate the reader thread (which is
