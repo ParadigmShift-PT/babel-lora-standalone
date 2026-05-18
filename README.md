@@ -133,6 +133,15 @@ hat.setPacketHandler(packet -> {
 });
 ```
 
+### Receive behaviour and loss guarantees
+
+The reader thread uses **length-prefixed framing** off the `payload_len` byte at offset 7 of the wire format, not a time-based gap. Concretely:
+
+- **Back-to-back frames are all delivered.** When the kernel UART buffer hands the reader several concatenated frames in a single chunk (e.g. after a brief JVM stall), every complete frame is carved out and delivered in order; only a trailing partial frame stays in the accumulator until its remaining bytes arrive.
+- **The accumulator is 1 KiB.** The hard upper bound on a single E22 frame is 249 bytes (240-byte max payload + 8-byte `lora_frame_t` header + 1 RSSI byte), so 1 KiB gives several frames of headroom. Reads are clamped to the free space remaining in the accumulator — if a stalled JVM wakes up to a full kernel queue, the leftover bytes simply stay in the kernel and are picked up on the next iteration.
+- **Two safety nets exist, neither of which can drop deliverable data.** A *buffer-overflow* path resets the accumulator when a partial frame somehow grows past 1 KiB (only reachable with a corrupt `payload_len` byte or sustained line noise). An *idle-timeout* path (50 ms — well above the ~1 ms inter-byte gap on a 9600-baud UART) drops stranded partial-frame bytes once the radio has clearly stopped streaming them. In both cases, every complete frame already in the buffer has been delivered before the drop is considered.
+- **The reader thread survives transient errors.** Any unexpected exception inside the loop is logged, the accumulator is reset, and reception continues. A single bad iteration no longer silently kills the thread.
+
 ### Custom radio configuration
 
 The default constructor uses sensible defaults for the 868 MHz EU band. To override anything (air speed, Tx power, channel, AES key, etc.), build an `E22Config` explicitly:

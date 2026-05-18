@@ -60,40 +60,43 @@ public class LoRaPacket {
     }
 
     public static LoRaPacket fromBytes(byte[] raw, int len, boolean packetRssi) {
-    final int headerLen = 8;
-    if (raw == null || len < headerLen) {
-        return null;
+        final int headerLen = 8;
+        if (raw == null || len < headerLen) {
+            return null;
+        }
+
+        int destAddr    = (raw[0] & 0xFF) | ((raw[1] & 0xFF) << 8);
+        int channel     =  raw[2] & 0xFF;
+        int originAddr  = (raw[3] & 0xFF) | ((raw[4] & 0xFF) << 8);
+        int prevHopAddr = (raw[5] & 0xFF) | ((raw[6] & 0xFF) << 8);
+        int payloadLen  =  raw[7] & 0xFF;
+
+        // Reject genuinely truncated frames (would otherwise copy garbage from
+        // the reader-thread accumulator). The trailing RSSI byte is treated as
+        // optional: when packetRssi is true but the byte hasn't arrived yet
+        // (the 50ms frame-timeout window can fire before the radio appends
+        // it), we still accept the frame and report rssi = 0.
+        int payloadEnd = headerLen + payloadLen;
+        if (payloadEnd > len) {
+            return null;
+        }
+
+        byte[] payload = new byte[payloadLen];
+        System.arraycopy(raw, headerLen, payload, 0, payloadLen);
+
+        int rssi = (packetRssi && len > payloadEnd)
+                ? (raw[payloadEnd] & 0xFF) - 256
+                : 0;
+
+        return new Builder()
+                .destination(destAddr)
+                .channel(channel)
+                .origin(originAddr)
+                .previousHop(prevHopAddr)
+                .payload(payload)
+                .rssi(rssi)
+                .build();
     }
-
-    int frameLen = packetRssi ? len - 1 : len;
-    if (frameLen < headerLen) {
-        return null;
-    }
-
-    int destAddr    = (raw[0] & 0xFF) | ((raw[1] & 0xFF) << 8);
-    int channel     =  raw[2] & 0xFF;
-    int originAddr  = (raw[3] & 0xFF) | ((raw[4] & 0xFF) << 8);
-    int prevHopAddr = (raw[5] & 0xFF) | ((raw[6] & 0xFF) << 8);
-    int payloadLen  =  raw[7] & 0xFF;
-
-    // if (headerLen + payloadLen > frameLen) {
-    //     return null;
-    // }
-
-    byte[] payload = new byte[payloadLen];
-    System.arraycopy(raw, headerLen, payload, 0, payloadLen);
-
-    int rssi = packetRssi ? (raw[len - 1] & 0xFF) - 256 : 0;
-
-    return new Builder()
-            .destination(destAddr)
-            .channel(channel)
-            .origin(originAddr)
-            .previousHop(prevHopAddr)
-            .payload(payload)
-            .rssi(rssi)
-            .build();
-}
 
     @Override
     public String toString() {

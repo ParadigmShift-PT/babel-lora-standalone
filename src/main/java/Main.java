@@ -11,7 +11,7 @@ import lora.LoRaPacket;
 
 public class Main {
 
-    static final int ownAddr = 0x4321;
+    static final int OWN_ADDR = 0x4321;
 
     public static void main(String[] args) throws Exception {
         Context pi4j = Pi4J.newContextBuilder()
@@ -28,14 +28,14 @@ public class Main {
                         RpiSpiProvider.newInstance())
                 .build();
 
-        LoRaHAT hat = new LoRaHAT(pi4j, ownAddr, "/dev/ttyAMA0");
+        LoRaHAT hat = new LoRaHAT(pi4j, OWN_ADDR, "/dev/ttyAMA0");
         hat.init();
 
-        LoRaPacket bcast_packet = new LoRaPacket.Builder().origin(ownAddr).payload("hello 123").build();
+        LoRaPacket bcast_packet = new LoRaPacket.Builder().origin(OWN_ADDR).payload("hello 123").build();
 
-        LoRaPacket addressed_packet = new LoRaPacket.Builder().origin(ownAddr).payload("hello").destination(0x8AEF).build();
+        LoRaPacket addressed_packet = new LoRaPacket.Builder().origin(OWN_ADDR).payload("hello").destination(0x8AEF).build();
 
-        while (1 > 0) {
+        while (true) {
             // hat.broadcast("123456789".getBytes(StandardCharsets.US_ASCII));
             // hat.transmit(bcast_packet);
             hat.transmit(addressed_packet);
